@@ -1,0 +1,75 @@
+name: Discover CRS Registry Stations
+
+on:
+  schedule:
+    # Still monthly, not daily - unlike the two liveradios.in discovery workflows, this cadence was
+    # never about Actions minutes: MIB republishes its CRS registry PDF roughly monthly (see
+    # discover_crs_registry.py's own docstring), so running more often than that would just re-fetch
+    # and re-diff against the same unchanged source data, minutes cost or not. 1st of the month,
+    # 12:00 PM UTC - not the 3:00 AM UTC slot discover-liveradios.yml uses. Both write
+    # manual_verified_radio.json in the private repo (see that workflow's own schedule comment for
+    # what a real overlap breaks), and now that discover-liveradios.yml fires daily including every
+    # 1st of the month, this needed a real gap: noon UTC clears discover-commercial-radio.yml's own
+    # worst-case end too (9:00 AM UTC start + 150-minute/2h30m budget = 11:30 AM UTC).
+    - cron: '0 12 1 * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    # No Playwright/browser involved (see the script's own docstring for why) - this is a plain
+    # PDF fetch, a few hundred small Radio Browser API calls, and a batch of media probes, so it
+    # finishes in minutes, not the liveradios.in workflows' delay-bound hour-plus.
+    timeout-minutes: 30
+
+    steps:
+      # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
+      # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
+      - name: Checkout private akashvani repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani
+          token: ${{ secrets.AKASHVANI_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/test_discover_crs_registry.py -v
+
+      - name: Install discovery Python dependencies
+        run: pip install -r requirements-discovery.txt
+
+      - name: Run CRS registry discovery
+        run: python discover_crs_registry.py
+
+      - name: Commit and push changes
+        id: commit
+        continue-on-error: true # let the retry step below get a chance before failing the job
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # No-ops cleanly if nothing new was found this run - git-auto-commit-action skips
+          # committing on an unchanged working tree.
+          commit_message: "chore: cross-check MIB's CRS registry against Radio Browser for new community radio stations"
+          file_pattern: "manual_verified_radio.json"
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+      # Same transient-push-failure pattern as scrape.yml's own retry step.
+      - name: Retry push on transient failure
+        if: steps.commit.outcome == 'failure'
+        run: |
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::Push failed after 3 retry attempts"
+          exit 1

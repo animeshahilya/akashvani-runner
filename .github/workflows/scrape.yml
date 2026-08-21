@@ -1,0 +1,199 @@
+name: Daily Akashvani Scraper
+
+on:
+  schedule:
+    # Once a day - 7:00 AM IST is 1:30 AM UTC (IST = UTC+5:30, no daylight saving) - GitHub
+    # Actions cron is always UTC, there's no timezone field to set instead. Every candidate is
+    # a fresh fetch every run; dead_stations.json/station_reliability.json only gate whether it
+    # also gets a fresh network liveness probe this run (see partition_confidently_alive()/
+    # partition_confidently_dead() in scraper/state.py) - a station repeatedly confirmed dead
+    # settles into being probed every few days instead of daily, everything else gets a fresh
+    # daily check. Unaffected by the discover-*.yml workflows' own daily/monthly retiming in this
+    # repo - this writes stations.json/tv_channels.json/etc, none of which those workflows touch.
+    - cron: '30 1 * * *' # 7:00 AM IST / 1:30 AM UTC
+    # No pull_request trigger here (unlike the private repo's own test.yml) - this repo holds only
+    # workflow definitions, so there's never a PR here with real scraper-code changes to test
+    # against. The `test` job below still runs before every scheduled/manual scrape as a pre-flight
+    # gate (see its own comment), just never against a PR diff.
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  test:
+    # Runs before every scheduled/manual scrape, as a gate on scrape-and-update below - a
+    # regression in the pure parsing/dedup logic blocks the daily auto-commit instead of only
+    # being discovered when the schedule silently misbehaves. The private animeshahilya/akashvani
+    # repo has its own separate test.yml that runs this same suite on every push/PR to that repo's
+    # actual code - this is a second, independent run of it, gating the scrape itself rather than
+    # the code change.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # Normally ~15s - bounds a hung dependency install/test run.
+    steps:
+      # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
+      # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
+      - name: Checkout private akashvani repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani
+          token: ${{ secrets.AKASHVANI_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+      # Type gate for the scraper package - mypy on scraper/ (clean, verified against mypy 2.3.1
+      # and Python 3.12). Runs after the tests so a pure parse/dedup regression fails the run
+      # first with the more specific error, but a green test suite alone no longer clears a
+      # type regression introduced by the same change. The types-requests stub package (in
+      # requirements-dev.txt) is required here, not optional: scraper/utils.py type-annotates
+      # requests.Session parameters, and without the stubs mypy fails the whole run on
+      # import-untyped for requests alone.
+      - name: Run mypy type check
+        run: mypy scraper/
+
+  scrape-and-update:
+    needs: test
+    runs-on: ubuntu-latest
+    # Was 15 (~3 minutes normally) before Junguler/South Asian IPTV joined as sources - their
+    # raw candidate counts (tens of thousands of stations/channels before dedup) pushed the
+    # validation pass alone past 15 minutes on its own, verified live, before this job's own
+    # candidate volume even fully validated once. 40 leaves real margin above that while still
+    # being a real bound: without one, a genuinely hung probe (a socket edge case outrunning
+    # STREAM_CONNECT_TIMEOUT/STREAM_READ_TIMEOUT) could run for GitHub's full 6-hour job default -
+    # and because cancel-in-progress is false below, every later scheduled/manual run would then
+    # queue behind it indefinitely instead of the hang failing fast.
+    timeout-minutes: 40
+    # A manual workflow_dispatch fired right as the scheduled run starts would otherwise race it,
+    # both trying to commit/push to the same branch. Queuing the second run instead of letting
+    # them race is safer than cancelling one mid-scrape, since is_stream_working()'s daily counts
+    # and dead_stations.json's pruning both assume a run completes as one atomic unit.
+    concurrency:
+      group: scrape-and-update
+      cancel-in-progress: false
+
+    steps:
+      # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
+      # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
+      - name: Checkout private akashvani repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani
+          token: ${{ secrets.AKASHVANI_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper script
+        id: scrape
+        run: python scrape_radio.py
+
+      - name: Commit and push changes
+        id: commit
+        continue-on-error: true # let the retry step below get a chance before failing the job
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # added/removed/added_tv/removed_tv come from the scrape step's own GITHUB_OUTPUT (see
+          # write_github_output() in scrape_radio.py) - empty if that step didn't run (e.g. it
+          # exited 1 with no working stations or channels at all), in which case there's nothing
+          # to commit anyway since git-auto-commit-action no-ops on an unchanged working tree.
+          commit_message: "chore: update akashvani stations and channels (+${{ steps.scrape.outputs.added }}/-${{ steps.scrape.outputs.removed }} stations, +${{ steps.scrape.outputs.added_tv }}/-${{ steps.scrape.outputs.removed_tv }} channels)"
+          # station_reliability.json/source_reliability.json (consecutive-success streaks / per-
+          # source success rate - see partition_confidently_alive() in scraper/state.py) and
+          # host_reliability.json's own extended probes/transient_failures counters (see
+          # build_host_timeout_overrides()) all need to persist across runs the same ephemeral-
+          # GitHub-Actions-runner reasoning dead_stations.json already documents. fetch_cache.json
+          # (FETCH_CACHE_PATH) and tv_source_baseline.json (TV_SOURCE_BASELINE_PATH) need the same
+          # treatment - both are git-committed by design (see their own doc comments in
+          # scraper/config/__init__.py), and this file_pattern is the only thing that actually
+          # enforces that: a file missing here is computed correctly every run and silently thrown
+          # away every run, with no error anywhere (verified live 2026-08-20 - both were missing
+          # from this list from the run that introduced them, discarding every run's real work
+          # until this fix). Always grep this list before adding a new persistent state file.
+          file_pattern: >-
+            stations.json tv_channels.json dead_stations.json junguler_file_stats.json
+            host_reliability.json station_reliability.json source_reliability.json
+            fetch_cache.json tv_source_baseline.json
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+      # Same transient-push-failure pattern as the akashvani-data mirror push below (see that
+      # step's comment) - now verified live on this step too (2026-08-13 runs 31710984381 and
+      # an earlier one), where git-auto-commit-action's push failed with a transient GitHub-side
+      # "Internal Server Error" even though the commit itself had already succeeded locally.
+      # Only the push is retried, never a second commit attempt - the working tree is already
+      # clean at this point, so re-running the commit action would just no-op anyway.
+      - name: Retry push to akashvani repo on transient failure
+        if: steps.commit.outcome == 'failure'
+        run: |
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::Push to akashvani failed after 3 retry attempts"
+          exit 1
+
+      # This repo (akashvani-runner) holds only workflow definitions; animeshahilya/akashvani holds
+      # the scraper's source (private, checked out above); animeshahilya/akashvani-data is a third,
+      # deliberately public repo holding nothing but the two published JSON files, so the Tarang
+      # app can keep fetching them unauthenticated (no token/proxy needed in the app) even though
+      # neither of the other two repos is public. DATA_REPO_TOKEN needs write access to
+      # akashvani-data only (Settings -> Secrets and variables -> Actions on *this* repo, not the
+      # private akashvani repo where it used to live).
+      - name: Checkout public data repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani-data
+          path: akashvani-data
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+
+      - name: Mirror published data into the public repo
+        run: cp stations.json tv_channels.json akashvani-data/
+
+      - name: Commit and push mirrored data
+        id: mirror_commit
+        continue-on-error: true # let the retry step below get a chance before failing the job
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          repository: akashvani-data
+          commit_message: "chore: sync from animeshahilya/akashvani (+${{ steps.scrape.outputs.added }}/-${{ steps.scrape.outputs.removed }} stations, +${{ steps.scrape.outputs.added_tv }}/-${{ steps.scrape.outputs.removed_tv }} channels)"
+          file_pattern: "stations.json tv_channels.json"
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+      # git-auto-commit-action above makes its commit locally and then pushes in the same step -
+      # verified live (2026-08-11 run 31455151850) that the push half can fail on its own
+      # ("remote: fatal error in commit_refs", a transient GitHub-side error, not a real
+      # conflict: nothing else ever pushes to akashvani-data except this same job, and
+      # scrape-and-update is already concurrency-locked above so two runs can't race each other
+      # here) while the commit itself already succeeded. Left unretried, that failure mode used
+      # to leave the app-facing mirror stale until the next scheduled run (or a manual
+      # workflow_dispatch) happened to catch it back up, up to 24 hours later. Only the push is
+      # retried, never a second commit attempt - the working tree is already clean at this point,
+      # so re-running the commit action would just no-op anyway.
+      - name: Retry push to public data repo on transient failure
+        if: steps.mirror_commit.outcome == 'failure'
+        working-directory: akashvani-data
+        run: |
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::Push to akashvani-data failed after 3 retry attempts"
+          exit 1

@@ -1,0 +1,167 @@
+name: Discover LiveRadios.in Stations
+
+on:
+  schedule:
+    # Daily now - this workflow runs in a public repo (animeshahilya/akashvani-runner), so Actions
+    # minutes are free/unlimited here regardless of how often it fires; the old ~10-day cadence
+    # existed only to conserve minutes on the private animeshahilya/akashvani repo, which no longer
+    # applies. 3:00 AM UTC (8:30 AM IST, IST = UTC+5:30, no daylight saving) - kept at the same slot
+    # discover-crs-registry.yml and discover-commercial-radio.yml key their own offsets off. This
+    # job's own timeout-minutes budget below (340 = 5h40m worst case) is what discover-commercial-
+    # radio.yml's 9:00 AM UTC start time is sized to clear, and what discover-crs-registry.yml's
+    # monthly noon-UTC slot is sized to clear too - all three write manual_verified_radio.json in
+    # the private repo, so a real overlap (not just a same-day one, now that this fires daily) would
+    # mean two jobs racing to push the same file, with the second's plain `git push` retry (below)
+    # failing on a non-fast-forward rejection instead of a transient error. liveradios.in's
+    # robots.txt mandates a 20-second delay before every request any of the three discovery scripts
+    # below makes, so a full cold crawl across all three (Community's 100+ pages, Devotional's ~66
+    # stations across 5 categories, Genre's ~115 stations across 11 categories) is delay-bound, not
+    # CPU-bound - in practice every run after the first full crawl is fast (each script's own
+    # already_captured() skips anything found on a prior run), so 5h40m only bounds the rare cold-
+    # crawl/many-new-stations case, not the typical daily run.
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    # Sum of the three original per-workflow budgets (150 + 90 + 90 = 330) plus setup overhead,
+    # kept under GitHub's 360-minute hard cap per job. See the schedule comment above for why
+    # discover-commercial-radio.yml and discover-crs-registry.yml's own start times are sized
+    # against this number.
+    timeout-minutes: 340
+    concurrency:
+      # Guards only against a manual workflow_dispatch overlapping an in-progress scheduled run
+      # (or vice versa) - there's nothing else left to race against now that all three scripts
+      # share this one job instead of three independent workflows.
+      group: liveradios-discovery
+      cancel-in-progress: false
+
+    steps:
+      # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - this repo
+      # holds nothing but workflow definitions; discover_community_radio.py/discover_devotional_
+      # radio.py/discover_genre_radio.py, manual_verified_radio.json, and everything else stay in
+      # the private repo and are never committed here. AKASHVANI_PAT is a fine-grained PAT scoped
+      # to Contents: Read and write on just that one repo (Settings -> Secrets and variables ->
+      # Actions on *this* repo) - actions/checkout wires it up as the git credential for this
+      # working directory, so the push in "Commit and push changes" below authenticates with it
+      # too, same mechanic as scrape.yml's own akashvani-data mirror checkout in the private repo.
+      - name: Checkout private akashvani repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani
+          token: ${{ secrets.AKASHVANI_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        # All three scripts' tests together (pure-logic, no browser needed - see each test file's
+        # own module docstring). The main scraper's tests are already gated in scrape.yml and
+        # unaffected by this workflow.
+        run: pytest tests/test_discover_community_radio.py tests/test_discover_devotional_radio.py tests/test_discover_genre_radio.py -v
+
+      - name: Install discovery Python dependencies
+        run: pip install -r requirements-discovery.txt
+
+      - name: Get installed Playwright version
+        id: playwright-version
+        # The playwright *package* doesn't expose its own version as a top-level __version__
+        # attribute (verified live: `import playwright; playwright.__version__` raises
+        # AttributeError on every run of this workflow, including successful ones - it was
+        # silently degrading this step to always emit an empty version string, weakening but not
+        # breaking the cache key below). importlib.metadata reads it from the installed
+        # distribution's own metadata instead, which is what actually has this.
+        run: echo "version=$(python -c 'import importlib.metadata; print(importlib.metadata.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      # The Chromium binary itself rarely changes between runs (only when requirements-discovery.
+      # txt's pinned range resolves to a new Playwright version) - shared once here across all
+      # three scripts below instead of being downloaded/cached three separate times as when they
+      # were three separate workflows.
+      - name: Cache Playwright browser binaries
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright's OS-level dependencies
+        # Bounds a hung apt-get - see discover-commercial-radio.yml's identical step for the real
+        # 2026-08-18 occurrence (stalled Ubuntu package-list fetch silently ate a whole job's
+        # timeout budget before the job-level timeout finally killed it).
+        timeout-minutes: 10
+        run: playwright install-deps chromium
+
+      - name: Install Chromium browser binary
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium
+
+      # Each discovery script keeps its own independent source marker/tag and reads-then-writes
+      # manual_verified_radio.json on disk, same as when these were three separate workflows - so
+      # running them sequentially in one job is behavior-identical to the old serialized-by-
+      # concurrency-group execution, just without the multi-workflow overhead. continue-on-error
+      # on each means one script's failure (e.g. a site-markup change breaking its extraction)
+      # doesn't cost the other two their run - matches the old per-workflow independence, where a
+      # failure in one workflow never stopped the other two's schedules.
+      - name: Run community radio discovery
+        id: community
+        continue-on-error: true
+        run: python discover_community_radio.py
+
+      - name: Run devotional radio discovery
+        id: devotional
+        continue-on-error: true
+        run: python discover_devotional_radio.py
+
+      - name: Run genre radio discovery
+        id: genre
+        continue-on-error: true
+        run: python discover_genre_radio.py
+
+      - name: Commit and push changes
+        id: commit
+        continue-on-error: true # let the retry step below get a chance before failing the job
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # No-ops cleanly if none of the three scripts found anything new or confirmed-dead-and-
+          # refreshed this run - git-auto-commit-action skips committing on an unchanged working
+          # tree. Runs even if one script above failed, so the other two's real finds still get
+          # published instead of being lost.
+          commit_message: "chore: discover new community/devotional/genre radio stations from liveradios.in"
+          file_pattern: "manual_verified_radio.json"
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+      # Same transient-push-failure pattern as scrape.yml's own retry steps - git-auto-commit-
+      # action's push has twice failed there with a transient GitHub-side "Internal Server Error"
+      # even though the commit itself had already succeeded locally. Only the push is retried,
+      # never a second commit attempt - the working tree is already clean at this point, so
+      # re-running the commit action would just no-op anyway. NOT a substitute for the clock-time
+      # staggering in the schedule comment above - a genuine non-fast-forward rejection (two
+      # workflows' pushes actually overlapping) fails all 3 attempts here, since none of them
+      # pull/rebase first.
+      - name: Retry push on transient failure
+        if: steps.commit.outcome == 'failure'
+        run: |
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::Push failed after 3 retry attempts"
+          exit 1
+
+      - name: Fail the job if any discovery script errored
+        # Surfaces a real failure as a red run (same visibility the old separate-workflow setup
+        # gave each script) even though the commit step above always runs regardless.
+        if: steps.community.outcome == 'failure' || steps.devotional.outcome == 'failure' || steps.genre.outcome == 'failure'
+        run: |
+          echo "::error::One or more liveradios.in discovery scripts failed - see their steps above for details."
+          exit 1

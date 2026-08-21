@@ -1,0 +1,108 @@
+name: Discover Commercial Radio Stations
+
+on:
+  schedule:
+    # Daily now - this workflow runs in a public repo (animeshahilya/akashvani-runner), so Actions
+    # minutes are free/unlimited here regardless of how often it fires; the old ~10-day cadence
+    # existed only to conserve minutes on the private animeshahilya/akashvani repo, which no longer
+    # applies. 9:00 AM UTC, not the same 3:00 AM UTC slot discover-liveradios.yml uses - both write
+    # manual_verified_radio.json in the private repo, so they can't safely overlap (see that
+    # workflow's own schedule comment for why a real overlap breaks the retry-push step below, not
+    # just risks a slow push). discover-liveradios.yml's own timeout-minutes is 340 (5h40m worst
+    # case); starting this one at 3:00 AM + 5h40m = 8:40 AM UTC leaves a real margin before 9:00 AM,
+    # not just the typical-case runtime.
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    # Generous relative to the ~132-station first-run candidate count (verified live 2026-08-17) at
+    # crawl-delay-bound pace, matching discover_community_radio.py's own 150-minute budget for a
+    # similarly-sized first crawl - see that script's own workflow for why this isn't CPU-bound.
+    timeout-minutes: 150
+    concurrency:
+      # Own group, distinct from discover-liveradios.yml's "liveradios-discovery" - guards only
+      # against a manual workflow_dispatch overlapping an in-progress scheduled run of this same
+      # workflow (or vice versa).
+      group: commercial-radio-discovery
+      cancel-in-progress: false
+
+    steps:
+      # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
+      # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
+      - name: Checkout private akashvani repo
+        uses: actions/checkout@v4
+        with:
+          repository: animeshahilya/akashvani
+          token: ${{ secrets.AKASHVANI_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/test_discover_commercial_radio.py -v
+
+      - name: Install discovery Python dependencies
+        run: pip install -r requirements-discovery.txt
+
+      - name: Get installed Playwright version
+        id: playwright-version
+        # importlib.metadata reads the installed distribution's own version metadata - the
+        # playwright *package* has no top-level __version__ attribute (see
+        # discover-liveradios.yml's own identical step for the full reasoning/history).
+        run: echo "version=$(python -c 'import importlib.metadata; print(importlib.metadata.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser binaries
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright's OS-level dependencies
+        # Bounds a hung apt-get (real occurrence 2026-08-18: stalled fetching package lists from
+        # archive.ubuntu.com/azure.archive.ubuntu.com, silently ate the whole 150-minute job
+        # budget before the job-level timeout finally killed it) - same "bound a hung dependency
+        # install" role scrape.yml's own job-level timeout already documents for its own step.
+        timeout-minutes: 10
+        run: playwright install-deps chromium
+
+      - name: Install Chromium browser binary
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium
+
+      - name: Run commercial radio discovery
+        id: commercial
+        run: python discover_commercial_radio.py
+
+      - name: Commit and push changes
+        id: commit
+        continue-on-error: true # let the retry step below get a chance before failing the job
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: discover new commercial radio stations from liveradios.in"
+          file_pattern: "manual_verified_radio.json"
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+      # Same transient-push-failure pattern as scrape.yml's/discover-liveradios.yml's own retry
+      # steps - git-auto-commit-action's push has twice failed there with a transient GitHub-side
+      # "Internal Server Error" even though the commit itself had already succeeded locally.
+      - name: Retry push on transient failure
+        if: steps.commit.outcome == 'failure'
+        run: |
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::Push failed after 3 retry attempts"
+          exit 1
