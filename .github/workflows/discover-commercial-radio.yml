@@ -2,16 +2,12 @@ name: Discover Commercial Radio Stations
 
 on:
   schedule:
-    # Daily now - this workflow runs in a public repo (animeshahilya/akashvani-runner), so Actions
-    # minutes are free/unlimited here regardless of how often it fires; the old ~10-day cadence
-    # existed only to conserve minutes on the private animeshahilya/akashvani repo, which no longer
-    # applies. 9:00 AM UTC, not the same 3:00 AM UTC slot discover-liveradios.yml uses - both write
-    # manual_verified_radio.json in the private repo, so they can't safely overlap (see that
-    # workflow's own schedule comment for why a real overlap breaks the retry-push step below, not
-    # just risks a slow push). discover-liveradios.yml's own timeout-minutes is 340 (5h40m worst
-    # case); starting this one at 3:00 AM + 5h40m = 8:40 AM UTC leaves a real margin before 9:00 AM,
-    # not just the typical-case runtime.
-    - cron: '0 9 * * *'
+    # Daily, third in this repo's five-workflow daily chain and the start of the "evening" half of
+    # it (see discover-liveradios.yml's own schedule comment for the full reasoning on why every
+    # workflow here needs its own clear slot, not just the ones sharing manual_verified_radio.json).
+    # 3:00 PM UTC (8:30 PM IST) - after discover-tv-registry.yml's own worst-case window (9:00 AM
+    # UTC start + 30-minute timeout) clears at 9:30 AM UTC, with wide margin to spare.
+    - cron: '0 15 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:

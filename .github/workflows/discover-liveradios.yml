@@ -2,17 +2,21 @@ name: Discover LiveRadios.in Stations
 
 on:
   schedule:
-    # Daily now - this workflow runs in a public repo (animeshahilya/akashvani-runner), so Actions
-    # minutes are free/unlimited here regardless of how often it fires; the old ~10-day cadence
-    # existed only to conserve minutes on the private animeshahilya/akashvani repo, which no longer
-    # applies. 3:00 AM UTC (8:30 AM IST, IST = UTC+5:30, no daylight saving) - kept at the same slot
-    # discover-crs-registry.yml and discover-commercial-radio.yml key their own offsets off. This
-    # job's own timeout-minutes budget below (340 = 5h40m worst case) is what discover-commercial-
-    # radio.yml's 9:00 AM UTC start time is sized to clear, and what discover-crs-registry.yml's
-    # monthly noon-UTC slot is sized to clear too - all three write manual_verified_radio.json in
-    # the private repo, so a real overlap (not just a same-day one, now that this fires daily) would
-    # mean two jobs racing to push the same file, with the second's plain `git push` retry (below)
-    # failing on a non-fast-forward rejection instead of a transient error. liveradios.in's
+    # Daily, first in a five-workflow daily chain against the private animeshahilya/akashvani repo
+    # (this runs in the public animeshahilya/akashvani-runner instead, so Actions minutes are
+    # free/unlimited here - the old ~10-day cadence only existed to conserve minutes on the private
+    # repo, which no longer applies). All five workflows in this repo (scrape.yml,
+    # discover-liveradios.yml, discover-commercial-radio.yml, discover-crs-registry.yml,
+    # discover-tv-registry.yml) push to that same repo's main branch, not just the three that write
+    # manual_verified_radio.json - a plain `git push` from a job whose local branch has fallen
+    # behind (because a *different* workflow pushed first, even to a different file) gets rejected
+    # outright, and none of these workflows' retry loops (including the one below) pull/rebase
+    # first. So every one of the five is sequenced with a real time gap sized to the previous job's
+    # worst-case timeout, not just the ones sharing a file. This slot: 3:00 AM UTC (8:30 AM IST,
+    # IST = UTC+5:30, no daylight saving) - starts after scrape.yml's own fixed 1:30 AM UTC slot
+    # clears (worst case ~2:20 AM UTC: 10-minute test job + 40-minute scrape-and-update job).
+    # This job's own timeout-minutes budget below (340 = 5h40m worst case, ending ~8:40 AM UTC) is
+    # what discover-tv-registry.yml's 9:00 AM UTC start time is sized to clear next. liveradios.in's
     # robots.txt mandates a 20-second delay before every request any of the three discovery scripts
     # below makes, so a full cold crawl across all three (Community's 100+ pages, Devotional's ~66
     # stations across 5 categories, Genre's ~115 stations across 11 categories) is delay-bound, not

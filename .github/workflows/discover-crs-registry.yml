@@ -2,16 +2,14 @@ name: Discover CRS Registry Stations
 
 on:
   schedule:
-    # Still monthly, not daily - unlike the two liveradios.in discovery workflows, this cadence was
-    # never about Actions minutes: MIB republishes its CRS registry PDF roughly monthly (see
-    # discover_crs_registry.py's own docstring), so running more often than that would just re-fetch
-    # and re-diff against the same unchanged source data, minutes cost or not. 1st of the month,
-    # 12:00 PM UTC - not the 3:00 AM UTC slot discover-liveradios.yml uses. Both write
-    # manual_verified_radio.json in the private repo (see that workflow's own schedule comment for
-    # what a real overlap breaks), and now that discover-liveradios.yml fires daily including every
-    # 1st of the month, this needed a real gap: noon UTC clears discover-commercial-radio.yml's own
-    # worst-case end too (9:00 AM UTC start + 150-minute/2h30m budget = 11:30 AM UTC).
-    - cron: '0 12 1 * *'
+    # Daily, last in this repo's five-workflow daily chain (see discover-liveradios.yml's own
+    # schedule comment for the full reasoning). MIB republishes its CRS registry PDF roughly
+    # monthly (see discover_crs_registry.py's own docstring), so most daily runs just re-fetch and
+    # re-diff against unchanged source data - an explicit tradeoff for a fully daily schedule, not
+    # an oversight, and a cheap one since this job is a 30-minute-worst-case plain PDF fetch with no
+    # Playwright/browser cost. 6:00 PM UTC (11:30 PM IST) - after discover-commercial-radio.yml's
+    # own worst-case window (3:00 PM UTC start + 150-minute timeout) clears at 5:30 PM UTC.
+    - cron: '0 18 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:

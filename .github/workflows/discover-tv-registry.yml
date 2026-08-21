@@ -2,14 +2,17 @@ name: Discover TV Registry Channels
 
 on:
   schedule:
-    # Still monthly - same reasoning as discover-crs-registry.yml's own schedule comment: TRAI
-    # republishes its MIB-sourced permitted-channels PDF roughly monthly (see
-    # discover_tv_registry.py's own docstring), so running more often would just re-fetch and
-    # re-diff against the same unchanged source data. This one writes manual_verified_tv.json, a
-    # different file from the manual_verified_radio.json trio (discover-liveradios.yml,
-    # discover-commercial-radio.yml, discover-crs-registry.yml), so it doesn't need to dodge their
-    # clock-time slots - kept at its original 1st of the month, 3:30 AM UTC.
-    - cron: '30 3 1 * *'
+    # Daily, second in this repo's five-workflow daily chain (see discover-liveradios.yml's own
+    # schedule comment for the full reasoning). TRAI republishes its MIB-sourced permitted-channels
+    # PDF roughly monthly (see discover_tv_registry.py's own docstring) so most daily runs just
+    # re-fetch and re-diff against unchanged source data - an explicit tradeoff for a fully daily
+    # schedule, not an oversight, and a cheap one since this job is a 30-minute-worst-case plain PDF
+    # fetch with no Playwright/browser cost. Writes manual_verified_tv.json, a different file from
+    # the manual_verified_radio.json trio (discover-liveradios.yml, discover-commercial-radio.yml,
+    # discover-crs-registry.yml), but still pushes to the same private repo's main branch, so it
+    # still needs its own clear slot: 9:00 AM UTC, after discover-liveradios.yml's own worst-case
+    # window (3:00 AM UTC start + 340-minute timeout) clears at 8:40 AM UTC.
+    - cron: '0 9 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
