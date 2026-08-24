@@ -100,6 +100,19 @@ jobs:
         id: scrape
         run: python scrape_radio.py
 
+      # The `test` job above runs the same suite, but necessarily against the *checked-out*
+      # stations.json/tv_channels.json - i.e. the previous run's output. That makes it useless as
+      # a guard on the data this run just produced: a malformed entry published today passes
+      # today's gate and then fails every subsequent run, blocking the scrape until someone edits
+      # the JSON by hand (verified live 2026-08-24: runs 32700836004 and 32705674584 both died
+      # this way, on a stream_url the 02:45 run had already committed hours earlier). Re-running
+      # only the published-data integrity tests here, after the scrape and before the commit,
+      # makes a bad publish fail its own run instead of the next one - the working tree is simply
+      # not committed. pytest-only (no mypy, no network fetches): the code gate already passed
+      # above, this is purely about the freshly written files.
+      - name: Check freshly generated data before committing
+        run: pip install -r requirements-dev.txt && pytest tests/test_published_data_integrity.py -v
+
       - name: Commit and push changes
         id: commit
         continue-on-error: true # let the retry step below get a chance before failing the job
