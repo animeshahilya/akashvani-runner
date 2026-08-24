@@ -31,13 +31,13 @@ jobs:
       # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
       # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
       - name: Checkout private akashvani repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: animeshahilya/akashvani
           token: ${{ secrets.AKASHVANI_PAT }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -82,13 +82,13 @@ jobs:
       # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
       # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
       - name: Checkout private akashvani repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: animeshahilya/akashvani
           token: ${{ secrets.AKASHVANI_PAT }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -116,7 +116,7 @@ jobs:
       - name: Commit and push changes
         id: commit
         continue-on-error: true # let the retry step below get a chance before failing the job
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           # added/removed/added_tv/removed_tv come from the scrape step's own GITHUB_OUTPUT (see
           # write_github_output() in scrape_radio.py) - empty if that step didn't run (e.g. it
@@ -141,6 +141,11 @@ jobs:
             fetch_cache.json tv_source_baseline.json
           commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 
+      # These bare `git push`es still authenticate as the checkout step's token even on
+      # actions/checkout@v6+, which moved the persisted credential out of .git/config and into a
+      # separate file under $RUNNER_TEMP - the local git config still points at it, so any run
+      # step in the same job pushes exactly as before. (Only a Docker container action would
+      # need anything extra, and nothing here is one.)
       # Same transient-push-failure pattern as the akashvani-data mirror push below (see that
       # step's comment) - now verified live on this step too (2026-08-13 runs 31710984381 and
       # an earlier one), where git-auto-commit-action's push failed with a transient GitHub-side
@@ -168,7 +173,7 @@ jobs:
       # akashvani-data only (Settings -> Secrets and variables -> Actions on *this* repo, not the
       # private akashvani repo where it used to live).
       - name: Checkout public data repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: animeshahilya/akashvani-data
           path: akashvani-data
@@ -180,7 +185,7 @@ jobs:
       - name: Commit and push mirrored data
         id: mirror_commit
         continue-on-error: true # let the retry step below get a chance before failing the job
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           repository: akashvani-data
           commit_message: "chore: sync from animeshahilya/akashvani (+${{ steps.scrape.outputs.added }}/-${{ steps.scrape.outputs.removed }} stations, +${{ steps.scrape.outputs.added_tv }}/-${{ steps.scrape.outputs.removed_tv }} channels)"

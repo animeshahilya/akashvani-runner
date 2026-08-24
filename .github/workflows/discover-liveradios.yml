@@ -51,13 +51,13 @@ jobs:
       # working directory, so the push in "Commit and push changes" below authenticates with it
       # too, same mechanic as scrape.yml's own akashvani-data mirror checkout in the private repo.
       - name: Checkout private akashvani repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: animeshahilya/akashvani
           token: ${{ secrets.AKASHVANI_PAT }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -90,7 +90,7 @@ jobs:
       # were three separate workflows.
       - name: Cache Playwright browser binaries
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
@@ -131,7 +131,7 @@ jobs:
       - name: Commit and push changes
         id: commit
         continue-on-error: true # let the retry step below get a chance before failing the job
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           # No-ops cleanly if none of the three scripts found anything new or confirmed-dead-and-
           # refreshed this run - git-auto-commit-action skips committing on an unchanged working
