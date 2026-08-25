@@ -78,6 +78,15 @@ jobs:
       group: scrape-and-update
       cancel-in-progress: false
 
+    # Named once so the commit step and the guard on its retry step can never disagree about which
+    # files this run was supposed to persist. Must contain no gitignored path - see the commit
+    # step's own comment for what happens when it does.
+    env:
+      COMMITTED_STATE_FILES: >-
+        stations.json tv_channels.json dead_stations.json junguler_file_stats.json
+        host_reliability.json station_reliability.json source_reliability.json
+        tv_source_baseline.json
+
     steps:
       # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
       # discover-liveradios.yml's identical step for the full reasoning on AKASHVANI_PAT.
@@ -95,6 +104,25 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # fetch_cache.json used to be carried between runs by committing it, alongside the state
+      # files below. It cannot be: it holds each cached URL's full response *body* (see
+      # fetch_text_if_modified() in scraper/utils.py - a 304 carries no body of its own, so the
+      # cache has to keep one or the conditional GET saves nothing), which put a real 84 MB blob
+      # into the repo on every daily commit until it was gitignored on 2026-08-24. Actions cache
+      # is where a large, entirely regenerable, cross-run blob belongs. Without this the scraper
+      # starts every run from an empty cache, which quietly turns every conditional GET back into
+      # a plain unconditional one - the feature still runs, it just never gets to do anything.
+      # Keyed by run_id with a prefix restore-key so each run restores the newest previous cache
+      # and saves its own updated one back (the standard rolling-cache shape - a fixed key would
+      # be written once and then never updated again).
+      - name: Restore the conditional-fetch cache
+        uses: actions/cache@v4
+        with:
+          path: fetch_cache.json
+          key: fetch-cache-${{ github.run_id }}
+          restore-keys: |
+            fetch-cache-
 
       - name: Run scraper script
         id: scrape
@@ -127,18 +155,23 @@ jobs:
           # source success rate - see partition_confidently_alive() in scraper/state.py) and
           # host_reliability.json's own extended probes/transient_failures counters (see
           # build_host_timeout_overrides()) all need to persist across runs the same ephemeral-
-          # GitHub-Actions-runner reasoning dead_stations.json already documents. fetch_cache.json
-          # (FETCH_CACHE_PATH) and tv_source_baseline.json (TV_SOURCE_BASELINE_PATH) need the same
-          # treatment - both are git-committed by design (see their own doc comments in
-          # scraper/config/__init__.py), and this file_pattern is the only thing that actually
-          # enforces that: a file missing here is computed correctly every run and silently thrown
-          # away every run, with no error anywhere (verified live 2026-08-20 - both were missing
-          # from this list from the run that introduced them, discarding every run's real work
-          # until this fix). Always grep this list before adding a new persistent state file.
-          file_pattern: >-
-            stations.json tv_channels.json dead_stations.json junguler_file_stats.json
-            host_reliability.json station_reliability.json source_reliability.json
-            fetch_cache.json tv_source_baseline.json
+          # GitHub-Actions-runner reasoning dead_stations.json already documents, as does
+          # tv_source_baseline.json (TV_SOURCE_BASELINE_PATH). COMMITTED_STATE_FILES is the only
+          # thing that actually enforces that: a file missing from it is computed correctly every
+          # run and silently thrown away every run, with no error anywhere (verified live
+          # 2026-08-20 - two were missing from the run that introduced them, discarding every
+          # run's real work until that fix). Always grep it before adding a new state file.
+          #
+          # The opposite mistake costs just as much and was live here for a day and a half:
+          # fetch_cache.json stayed in this list after being gitignored on 2026-08-24, and
+          # `git add` exits 1 on an ignored path, which aborts this whole action before it commits
+          # anything at all. So from that commit until 2026-08-25, every run discarded all eight
+          # files rather than just the one - the private stations.json sat frozen while the
+          # confident-alive/confident-dead skip windows, the Junguler low-yield stats and the TV
+          # source baseline were all still being read from, and never advanced past, their
+          # 2026-08-24 snapshot. Never list a gitignored path here; the cache step above is where
+          # fetch_cache.json lives now.
+          file_pattern: ${{ env.COMMITTED_STATE_FILES }}
           commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 
       # These bare `git push`es still authenticate as the checkout step's token even on
@@ -150,11 +183,23 @@ jobs:
       # step's comment) - now verified live on this step too (2026-08-13 runs 31710984381 and
       # an earlier one), where git-auto-commit-action's push failed with a transient GitHub-side
       # "Internal Server Error" even though the commit itself had already succeeded locally.
-      # Only the push is retried, never a second commit attempt - the working tree is already
-      # clean at this point, so re-running the commit action would just no-op anyway.
+      # Only the push is retried, never a second commit attempt - if the commit succeeded, the
+      # working tree is already clean, so re-running the commit action would just no-op anyway.
+      #
+      # "If the commit succeeded" is the load-bearing half, and it is now checked rather than
+      # assumed. A commit step that failed *before* committing leaves the tree dirty with nothing
+      # to push, and a bare `git push` answers 0 to that - so this step, whose whole purpose is to
+      # rescue the run, would instead report a run that committed nothing as green. Not
+      # hypothetical: that is exactly what hid the gitignored-file_pattern breakage described
+      # above behind a day and a half of green runs, from 2026-08-24 until 2026-08-25.
       - name: Retry push to akashvani repo on transient failure
         if: steps.commit.outcome == 'failure'
         run: |
+          if [ -n "$(git status --porcelain -- $COMMITTED_STATE_FILES)" ]; then
+            echo "::error::The commit step failed without committing - the files below are still uncommitted, so retrying the push cannot help and would report this run as green."
+            git status --porcelain -- $COMMITTED_STATE_FILES
+            exit 1
+          fi
           for attempt in 1 2 3; do
             if git push; then
               exit 0
@@ -206,6 +251,12 @@ jobs:
         if: steps.mirror_commit.outcome == 'failure'
         working-directory: akashvani-data
         run: |
+          # Same guard, same reasoning as the private-repo retry step above.
+          if [ -n "$(git status --porcelain -- stations.json tv_channels.json)" ]; then
+            echo "::error::The mirror commit step failed without committing - the files below are still uncommitted, so retrying the push cannot help and would report this run as green."
+            git status --porcelain -- stations.json tv_channels.json
+            exit 1
+          fi
           for attempt in 1 2 3; do
             if git push; then
               exit 0

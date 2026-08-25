@@ -62,6 +62,17 @@ jobs:
       - name: Retry push on transient failure
         if: steps.commit.outcome == 'failure'
         run: |
+          # Guards the same way scrape.yml's own retry step does, and for the same reason: this
+          # step exists for a transient push failure, where the commit already succeeded locally.
+          # A commit step that failed *before* committing leaves the tree dirty with nothing to
+          # push, and a bare `git push` answers 0 to that - turning a run that committed nothing
+          # into a green one. See scrape.yml's commit step for the day and a half of green runs
+          # that shape actually cost.
+          if [ -n "$(git status --porcelain -- manual_verified_radio.json)" ]; then
+            echo "::error::The commit step failed without committing - manual_verified_radio.json is still uncommitted, so retrying the push cannot help and would report this run as green."
+            git status --porcelain -- manual_verified_radio.json
+            exit 1
+          fi
           for attempt in 1 2 3; do
             if git push; then
               exit 0
