@@ -141,6 +141,65 @@ jobs:
       - name: Check freshly generated data before committing
         run: pip install -r requirements-dev.txt && pytest tests/test_published_data_integrity.py -v
 
+      # Both push-retry steps below need identical logic, and this file's own history shows what
+      # happens when near-identical blocks drift apart (the guard added to one of them had to be
+      # copied into the other by hand). Written once here, into $RUNNER_TEMP so it is reachable
+      # whichever repo's working directory a step runs in - the akashvani checkout replaces the
+      # workspace root, so a script committed in THIS repo would not be on disk at all.
+      - name: Prepare the shared push helper
+        run: |
+          cat > "$RUNNER_TEMP/push_with_rebase.sh" <<'HELPER'
+          # push_with_rebase <label> - pushes the current branch, distinguishing the two failure
+          # modes that actually happen here instead of treating every failure as transient.
+          #
+          #  * TRANSIENT (a GitHub-side 500, "remote: fatal error in commit_refs") - verified live
+          #    on both of these steps. Worth sleeping and retrying: the same push will work.
+          #
+          #  * NON-FAST-FORWARD - the remote branch moved while this job was working. Retrying is
+          #    pointless (it is not a blip, the rejection is deterministic) and used to burn three
+          #    attempts and 60 seconds before failing the run and discarding everything the scrape
+          #    had produced. Verified live 2026-08-26, run 32932382449: a source-code push landed
+          #    on akashvani/master during the ~13-minute scrape, and a complete, healthy run (+187
+          #    /-145 stations, +457/-160 channels) was thrown away over it. Rebasing this run's
+          #    data commit onto the updated remote and pushing again is safe and is what a person
+          #    would do by hand: this job only ever commits generated data files, and the
+          #    concurrency group above already guarantees no other scrape is writing them.
+          #
+          # A rebase that genuinely conflicts is NOT forced past - that would mean something else
+          # really did change the same generated files, which this job cannot resolve correctly,
+          # so it fails loudly with both sides intact.
+          push_with_rebase() {
+            local label="$1"
+            local err="$RUNNER_TEMP/push_err.txt"
+            # Rebase replays commits, which needs a committer identity even though it keeps each
+            # commit's original author.
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            for attempt in 1 2 3; do
+              if git push 2>"$err"; then
+                return 0
+              fi
+              cat "$err"
+              if grep -qiE 'non-fast-forward|fetch first|behind its remote' "$err"; then
+                echo "$label: the remote moved while this run was working - rebasing onto it."
+                if git pull --rebase --autostash; then
+                  # Deliberately no sleep: this was never a transient failure, and the very next
+                  # push is now a fast-forward.
+                  continue
+                fi
+                git rebase --abort || true
+                echo "::error::$label: rebase onto the updated remote conflicted, which means something else changed the same generated files this run produced. Not forcing past it - both sides are left intact."
+                return 1
+              fi
+              echo "$label: push attempt $attempt failed and looks transient, retrying in 20s..."
+              sleep 20
+            done
+            echo "::error::$label: push failed after 3 attempts."
+            return 1
+          }
+          HELPER
+          echo "Wrote $RUNNER_TEMP/push_with_rebase.sh"
+
       - name: Commit and push changes
         id: commit
         continue-on-error: true # let the retry step below get a chance before failing the job
@@ -200,15 +259,8 @@ jobs:
             git status --porcelain -- $COMMITTED_STATE_FILES
             exit 1
           fi
-          for attempt in 1 2 3; do
-            if git push; then
-              exit 0
-            fi
-            echo "Push attempt $attempt failed, retrying in 20s..."
-            sleep 20
-          done
-          echo "::error::Push to akashvani failed after 3 retry attempts"
-          exit 1
+          source "$RUNNER_TEMP/push_with_rebase.sh"
+          push_with_rebase "akashvani"
 
       # This repo (akashvani-runner) holds only workflow definitions; animeshahilya/akashvani holds
       # the scraper's source (private, checked out above); animeshahilya/akashvani-data is a third,
@@ -257,12 +309,29 @@ jobs:
             git status --porcelain -- stations.json tv_channels.json
             exit 1
           fi
-          for attempt in 1 2 3; do
-            if git push; then
-              exit 0
-            fi
-            echo "Push attempt $attempt failed, retrying in 20s..."
-            sleep 20
-          done
-          echo "::error::Push to akashvani-data failed after 3 retry attempts"
-          exit 1
+          source "$RUNNER_TEMP/push_with_rebase.sh"
+          push_with_rebase "akashvani-data"
+
+      # A scrape is ~13 minutes of real network work whose whole output is these files, and until
+      # now any failure after the scrape (the push rejection in run 32932382449, a bad-data gate,
+      # a runner timeout) destroyed all of it - the runner is torn down and the next run starts
+      # from the last committed state. The rebase handling above should stop the common case, but
+      # a run that fails anyway is now recoverable by hand instead of simply gone. Kept short:
+      # this is a rescue copy, not an archive, and the next successful run supersedes it.
+      - name: Keep this run's generated data when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akashvani-data-${{ github.run_id }}
+          path: |
+            stations.json
+            tv_channels.json
+            dead_stations.json
+            junguler_file_stats.json
+            host_reliability.json
+            station_reliability.json
+            source_reliability.json
+            tv_source_baseline.json
+            stream_self_report.json
+          if-no-files-found: warn
+          retention-days: 7
