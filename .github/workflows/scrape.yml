@@ -85,7 +85,7 @@ jobs:
       COMMITTED_STATE_FILES: >-
         stations.json tv_channels.json dead_stations.json junguler_file_stats.json
         host_reliability.json station_reliability.json source_reliability.json
-        tv_source_baseline.json
+        tv_source_baseline.json stream_self_report.json
 
     steps:
       # Checks out the PRIVATE animeshahilya/akashvani repo, not this (public) repo - see
