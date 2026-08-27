@@ -8,8 +8,10 @@ on:
     # also gets a fresh network liveness probe this run (see partition_confidently_alive()/
     # partition_confidently_dead() in scraper/state.py) - a station repeatedly confirmed dead
     # settles into being probed every few days instead of daily, everything else gets a fresh
-    # daily check. Unaffected by the discover-*.yml workflows' own daily/monthly retiming in this
-    # repo - this writes stations.json/tv_channels.json/etc, none of which those workflows touch.
+    # daily check. Unaffected by the discover-*.yml workflows' own 2026-08-27 move to weekly,
+    # one-per-day-of-week slots in this repo - this stays daily on purpose, because unlike source
+    # discovery, stream liveness really does change day to day. It also writes
+    # stations.json/tv_channels.json/etc, none of which those workflows touch.
     - cron: '30 1 * * *' # 7:00 AM IST / 1:30 AM UTC
     # No pull_request trigger here (unlike the private repo's own test.yml) - this repo holds only
     # workflow definitions, so there's never a PR here with real scraper-code changes to test

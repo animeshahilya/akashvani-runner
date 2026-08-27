@@ -2,28 +2,35 @@ name: Discover LiveRadios.in Stations
 
 on:
   schedule:
-    # Daily, first in a five-workflow daily chain against the private animeshahilya/akashvani repo
-    # (this runs in the public animeshahilya/akashvani-runner instead, so Actions minutes are
-    # free/unlimited here - the old ~10-day cadence only existed to conserve minutes on the private
-    # repo, which no longer applies). All five workflows in this repo (scrape.yml,
-    # discover-liveradios.yml, discover-commercial-radio.yml, discover-crs-registry.yml,
-    # discover-tv-registry.yml) push to that same repo's main branch, not just the three that write
-    # manual_verified_radio.json - a plain `git push` from a job whose local branch has fallen
-    # behind (because a *different* workflow pushed first, even to a different file) gets rejected
-    # outright, and none of these workflows' retry loops (including the one below) pull/rebase
-    # first. So every one of the five is sequenced with a real time gap sized to the previous job's
-    # worst-case timeout, not just the ones sharing a file. This slot: 3:00 AM UTC (8:30 AM IST,
-    # IST = UTC+5:30, no daylight saving) - starts after scrape.yml's own fixed 1:30 AM UTC slot
-    # clears (worst case ~2:20 AM UTC: 10-minute test job + 40-minute scrape-and-update job).
-    # This job's own timeout-minutes budget below (340 = 5h40m worst case, ending ~8:40 AM UTC) is
-    # what discover-tv-registry.yml's 9:00 AM UTC start time is sized to clear next. liveradios.in's
-    # robots.txt mandates a 20-second delay before every request any of the three discovery scripts
-    # below makes, so a full cold crawl across all three (Community's 100+ pages, Devotional's ~66
-    # stations across 5 categories, Genre's ~115 stations across 11 categories) is delay-bound, not
-    # CPU-bound - in practice every run after the first full crawl is fast (each script's own
-    # already_captured() skips anything found on a prior run), so 5h40m only bounds the rare cold-
-    # crawl/many-new-stations case, not the typical daily run.
-    - cron: '0 3 * * *'
+    # Weekly, not daily. The four discover-*.yml workflows in this repo ran daily until
+    # 2026-08-27, and every run for days had ended in "Discovered 0 new station(s)" and a clean
+    # tree, because each script's own already_captured() has swept its source dry and those
+    # sources gain new entries far slower than once a day. Daily runs bought nothing and re-
+    # crawled liveradios.in at its mandated 20-second-per-request pace for hours to prove it.
+    # scrape.yml is deliberately NOT included in this change and stays daily - it re-probes
+    # existing stream liveness, which genuinely does change day to day, unlike source discovery.
+    #
+    # Each of the four now owns a different day of the week, which also retires the old daily-
+    # chain sequencing between them. All five workflows in this repo push to the private
+    # animeshahilya/akashvani repo's main branch, and a plain `git push` from a job whose local
+    # branch has fallen behind (because a *different* workflow pushed first, even to a different
+    # file) is rejected outright - the discovery workflows' git-auto-commit step does not
+    # pull/rebase first, unlike scrape.yml's own push helper. Separate days make that race
+    # impossible between them rather than merely unlikely. Each one still has to clear scrape.yml's
+    # own fixed 1:30 AM UTC daily slot (worst case ~2:20 AM UTC: 10-minute test job + 40-minute
+    # scrape-and-update job), which every time-of-day slot below already does.
+    #
+    # Sunday 3:17 AM UTC (8:47 AM IST, IST = UTC+5:30, no daylight saving). The odd minute is
+    # deliberate: GitHub drops scheduled triggers under load, on-the-hour slots are the most
+    # contended, and runs of this workflow have historically started 30-90 minutes late with some
+    # skipped outright. A dropped weekly run costs a week, so it matters more now than it did
+    # daily. liveradios.in's robots.txt mandates a 20-second delay before every request the three
+    # discovery scripts below make, so a full cold crawl (Community's 100+ pages, Devotional's ~66
+    # stations across 5 categories, Genre's ~115 stations across 11 categories) is delay-bound,
+    # not CPU-bound - in practice every run after the first is fast, so this job's 340-minute
+    # budget below only bounds the rare cold-crawl/many-new-stations case. Worst case still ends
+    # ~8:57 AM UTC Sunday, with nothing else in this repo scheduled that day.
+    - cron: '17 3 * * 0'
   workflow_dispatch: # Allow manual triggering
 
 jobs:

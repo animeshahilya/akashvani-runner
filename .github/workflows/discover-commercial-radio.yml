@@ -2,12 +2,16 @@ name: Discover Commercial Radio Stations
 
 on:
   schedule:
-    # Daily, third in this repo's five-workflow daily chain and the start of the "evening" half of
-    # it (see discover-liveradios.yml's own schedule comment for the full reasoning on why every
-    # workflow here needs its own clear slot, not just the ones sharing manual_verified_radio.json).
-    # 3:00 PM UTC (8:30 PM IST) - after discover-tv-registry.yml's own worst-case window (9:00 AM
-    # UTC start + 30-minute timeout) clears at 9:30 AM UTC, with wide margin to spare.
-    - cron: '0 15 * * *'
+    # Weekly, on its own day of the week - see discover-liveradios.yml's own schedule comment for
+    # the full reasoning on why the four discover-*.yml workflows moved off daily and onto
+    # separate days. This one crawls the same 20-second-delay-bound liveradios.in that workflow
+    # does, and its recent daily runs each spent ~11 minutes re-walking 26 already-captured pages
+    # only to report "Discovered 0 new commercial radio station(s)".
+    #
+    # Thursday 3:41 PM UTC (9:11 PM IST). Odd minute for the same dropped-scheduled-trigger reason
+    # given in discover-liveradios.yml. Clear of scrape.yml's daily 1:30 AM UTC window, and on a
+    # different day from every other discovery workflow here.
+    - cron: '41 15 * * 4'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
