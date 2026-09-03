@@ -335,5 +335,6 @@ jobs:
             source_reliability.json
             tv_source_baseline.json
             stream_self_report.json
+            run_health.json
           if-no-files-found: warn
           retention-days: 7
