@@ -182,7 +182,9 @@ jobs:
             # A rejected push is usually the daily scrape having pushed meantime (09-20 failure):
             # retrying the same push can never succeed without rebasing onto it. This job only
             # touches manual_verified_*.json, which the scrape never writes, so it's conflict-free.
-            git pull --rebase --autostash || true
+            # The runner has no git identity and a rebase re-creates commits, so it needs one; a
+            # failed rebase is aborted so the next attempt is not left on a detached HEAD.
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" pull --rebase --autostash || git rebase --abort || true
           done
           echo "::error::Push failed after 3 retry attempts"
           exit 1
