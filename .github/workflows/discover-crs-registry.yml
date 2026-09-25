@@ -2,6 +2,9 @@ name: Discover CRS Registry Stations
 
 on:
   schedule:
+    # Daily since 2026-09-25 (owner's call: every workflow runs once a day). The time of day below
+    # is unchanged, so the four still never overlap each other or scrape.yml's 1:30 AM UTC slot,
+    # and each push retries with a rebase if another workflow pushed first.
     # Weekly, on its own day of the week - see discover-liveradios.yml's own schedule comment for
     # the full reasoning on why the four discover-*.yml workflows moved off daily and onto
     # separate days. That reasoning applies with extra force here: MIB republishes its CRS registry
@@ -11,7 +14,7 @@ on:
     # Saturday 6:47 PM UTC (12:17 AM IST Sunday). Odd minute for the same dropped-scheduled-trigger
     # reason given in discover-liveradios.yml. Clear of scrape.yml's daily 1:30 AM UTC window, and
     # on a different day from every other discovery workflow here.
-    - cron: '47 18 * * 6'
+    - cron: '47 18 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:

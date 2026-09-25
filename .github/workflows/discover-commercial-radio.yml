@@ -2,6 +2,9 @@ name: Discover Commercial Radio Stations
 
 on:
   schedule:
+    # Daily since 2026-09-25 (owner's call: every workflow runs once a day). The time of day below
+    # is unchanged, so the four still never overlap each other or scrape.yml's 1:30 AM UTC slot,
+    # and each push retries with a rebase if another workflow pushed first.
     # Weekly, on its own day of the week - see discover-liveradios.yml's own schedule comment for
     # the full reasoning on why the four discover-*.yml workflows moved off daily and onto
     # separate days. This one crawls the same 20-second-delay-bound liveradios.in that workflow
@@ -11,7 +14,7 @@ on:
     # Thursday 3:41 PM UTC (9:11 PM IST). Odd minute for the same dropped-scheduled-trigger reason
     # given in discover-liveradios.yml. Clear of scrape.yml's daily 1:30 AM UTC window, and on a
     # different day from every other discovery workflow here.
-    - cron: '41 15 * * 4'
+    - cron: '41 15 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:

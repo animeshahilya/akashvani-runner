@@ -2,6 +2,9 @@ name: Discover LiveRadios.in Stations
 
 on:
   schedule:
+    # Daily since 2026-09-25 (owner's call: every workflow runs once a day). The time of day below
+    # is unchanged, so the four still never overlap each other or scrape.yml's 1:30 AM UTC slot,
+    # and each push retries with a rebase if another workflow pushed first.
     # Weekly, not daily. The four discover-*.yml workflows in this repo ran daily until
     # 2026-08-27, and every run for days had ended in "Discovered 0 new station(s)" and a clean
     # tree, because each script's own already_captured() has swept its source dry and those
@@ -30,7 +33,7 @@ on:
     # not CPU-bound - in practice every run after the first is fast, so this job's 340-minute
     # budget below only bounds the rare cold-crawl/many-new-stations case. Worst case still ends
     # ~8:57 AM UTC Sunday, with nothing else in this repo scheduled that day.
-    - cron: '17 3 * * 0'
+    - cron: '17 3 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
