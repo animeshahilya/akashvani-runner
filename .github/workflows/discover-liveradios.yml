@@ -76,7 +76,7 @@ jobs:
         # All three scripts' tests together (pure-logic, no browser needed - see each test file's
         # own module docstring). The main scraper's tests are already gated in scrape.yml and
         # unaffected by this workflow.
-        run: pytest tests/test_discover_community_radio.py tests/test_discover_devotional_radio.py tests/test_discover_genre_radio.py -v
+        run: pytest tests/test_discover_common.py tests/test_discover_devotional_radio.py tests/test_discover_genre_radio.py -v
 
       - name: Install discovery Python dependencies
         run: pip install -r requirements-discovery.txt

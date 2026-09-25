@@ -44,7 +44,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: pytest tests/test_discover_tv_registry.py -v
+        run: pytest tests/test_discover_registry_common.py tests/test_discover_tv_registry.py -v
 
       - name: Install discovery Python dependencies
         run: pip install -r requirements-discovery.txt
