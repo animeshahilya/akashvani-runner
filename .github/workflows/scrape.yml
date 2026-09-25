@@ -128,6 +128,10 @@ jobs:
 
       - name: Run scraper script
         id: scrape
+        # Authenticates the scraper's api.github.com tree fetches (60/hour unauthenticated,
+        # shared across the runner pool - see github_api_headers() in scraper/utils.py).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scrape_radio.py
 
       # The `test` job above runs the same suite, but necessarily against the *checked-out*
