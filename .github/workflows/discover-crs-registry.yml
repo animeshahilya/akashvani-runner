@@ -81,6 +81,10 @@ jobs:
             fi
             echo "Push attempt $attempt failed, retrying in 20s..."
             sleep 20
+            # A rejected push is usually the daily scrape having pushed meantime (09-20 failure):
+            # retrying the same push can never succeed without rebasing onto it. This job only
+            # touches manual_verified_*.json, which the scrape never writes, so it's conflict-free.
+            git pull --rebase --autostash || true
           done
           echo "::error::Push failed after 3 retry attempts"
           exit 1
