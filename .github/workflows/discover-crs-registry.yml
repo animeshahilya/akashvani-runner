@@ -60,7 +60,7 @@ jobs:
           # No-ops cleanly if nothing new was found this run - git-auto-commit-action skips
           # committing on an unchanged working tree.
           commit_message: "chore: cross-check MIB's CRS registry against Radio Browser for new community radio stations"
-          file_pattern: "manual_verified_radio.json"
+          file_pattern: "manual_verified_radio.json crs_registry.json"
           commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 
       # Same transient-push-failure pattern as scrape.yml's own retry step.
@@ -73,9 +73,9 @@ jobs:
           # push, and a bare `git push` answers 0 to that - turning a run that committed nothing
           # into a green one. See scrape.yml's commit step for the day and a half of green runs
           # that shape actually cost.
-          if [ -n "$(git status --porcelain -- manual_verified_radio.json)" ]; then
-            echo "::error::The commit step failed without committing - manual_verified_radio.json is still uncommitted, so retrying the push cannot help and would report this run as green."
-            git status --porcelain -- manual_verified_radio.json
+          if [ -n "$(git status --porcelain -- manual_verified_radio.json crs_registry.json)" ]; then
+            echo "::error::The commit step failed without committing - manual_verified_radio.json or crs_registry.json is still uncommitted, so retrying the push cannot help and would report this run as green."
+            git status --porcelain -- manual_verified_radio.json crs_registry.json
             exit 1
           fi
           for attempt in 1 2 3; do
