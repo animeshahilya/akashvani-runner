@@ -135,6 +135,8 @@ jobs:
         # shared across the runner pool - see github_api_headers() in scraper/utils.py).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Second probe from Mumbai for links this runner cannot settle - ask_india() in akashvani.
+          INDIA_PROBE_KEY: ${{ secrets.INDIA_PROBE_KEY }}
         run: python scrape_radio.py
 
       # The `test` job above runs the same suite, but necessarily against the *checked-out*
