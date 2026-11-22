@@ -139,6 +139,15 @@ jobs:
           INDIA_PROBE_KEY: ${{ secrets.INDIA_PROBE_KEY }}
         run: python scrape_radio.py
 
+      # Today's AIR programme guides, fetched through Mumbai (the cue sheet site answers from India
+      # only) - scraper/programme_guide.py in akashvani. Mirrored to akashvani-data for the app,
+      # which falls back to fetching sheets itself, so a failure here must not stop the publish.
+      - name: Fetch AIR programme guide
+        continue-on-error: true
+        env:
+          INDIA_PROBE_KEY: ${{ secrets.INDIA_PROBE_KEY }}
+        run: python -m scraper.programme_guide
+
       # The `test` job above runs the same suite, but necessarily against the *checked-out*
       # stations.json/tv_channels.json - i.e. the previous run's output. That makes it useless as
       # a guard on the data this run just produced: a malformed entry published today passes
@@ -288,7 +297,9 @@ jobs:
           token: ${{ secrets.DATA_REPO_TOKEN }}
 
       - name: Mirror published data into the public repo
-        run: cp stations.json tv_channels.json akashvani-data/
+        run: |
+          cp stations.json tv_channels.json akashvani-data/
+          if [ -f programme_guide.json ]; then cp programme_guide.json akashvani-data/; fi
 
       - name: Commit and push mirrored data
         id: mirror_commit
@@ -297,7 +308,7 @@ jobs:
         with:
           repository: akashvani-data
           commit_message: "chore: sync from animeshahilya/akashvani (+${{ steps.scrape.outputs.added }}/-${{ steps.scrape.outputs.removed }} stations, +${{ steps.scrape.outputs.added_tv }}/-${{ steps.scrape.outputs.removed_tv }} channels)"
-          file_pattern: "stations.json tv_channels.json"
+          file_pattern: "*.json"
           commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 
       # git-auto-commit-action above makes its commit locally and then pushes in the same step -
@@ -315,9 +326,9 @@ jobs:
         working-directory: akashvani-data
         run: |
           # Same guard, same reasoning as the private-repo retry step above.
-          if [ -n "$(git status --porcelain -- stations.json tv_channels.json)" ]; then
+          if [ -n "$(git status --porcelain -- '*.json')" ]; then
             echo "::error::The mirror commit step failed without committing - the files below are still uncommitted, so retrying the push cannot help and would report this run as green."
-            git status --porcelain -- stations.json tv_channels.json
+            git status --porcelain -- '*.json'
             exit 1
           fi
           source "$RUNNER_TEMP/push_with_rebase.sh"
