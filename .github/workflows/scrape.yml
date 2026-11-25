@@ -340,7 +340,8 @@ jobs:
       # from the last committed state. The rebase handling above should stop the common case, but
       # a run that fails anyway is now recoverable by hand instead of simply gone. Kept short:
       # this is a rescue copy, not an archive, and the next successful run supersedes it.
-      # upload-artifact wants one path per line, so COMMITTED_STATE_FILES is reshaped here
+      #
+      # upload-artifact wants one path per line, so COMMITTED_STATE_FILES is reshaped first
       # rather than copied out by hand (a second copy is one more list to forget a new file in).
       - name: List the files to rescue
         if: failure()
@@ -351,7 +352,6 @@ jobs:
             printf '%s\n' $COMMITTED_STATE_FILES programme_guide.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
       - name: Keep this run's generated data when something failed
         if: failure()
         uses: actions/upload-artifact@v4
