@@ -21,9 +21,12 @@ events in the repo it lives in.
 
 ## Setup
 
-Two repo secrets are required (Settings -> Secrets and variables -> Actions):
+These repo secrets are used (Settings -> Secrets and variables -> Actions):
 
 - `AKASHVANI_PAT` - fine-grained PAT, `Contents: Read and write` scoped to `animeshahilya/akashvani`
   only.
 - `DATA_REPO_TOKEN` - fine-grained PAT, `Contents: Read and write` scoped to
   `animeshahilya/akashvani-data` only.
+- `INDIA_PROBE_KEY` - the shared key of the Mumbai probe on Vercel (`api/india_probe.py` and
+  `api/cue_sheets.py` in akashvani). Optional: without it the scrape skips the Mumbai second
+  opinion and the programme guide step fails on its own without stopping the publish.

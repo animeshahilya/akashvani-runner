@@ -2,21 +2,8 @@ name: Discover TV Registry Channels
 
 on:
   schedule:
-    # Daily since 2026-09-25 (owner's call: every workflow runs once a day). The time of day below
-    # is unchanged, so the four still never overlap each other or scrape.yml's 1:30 AM UTC slot,
-    # and each push retries with a rebase if another workflow pushed first.
-    # Weekly, on its own day of the week - see discover-liveradios.yml's own schedule comment for
-    # the full reasoning on why the four discover-*.yml workflows moved off daily and onto
-    # separate days. That reasoning applies with extra force here: TRAI republishes its MIB-sourced
-    # permitted-channels PDF roughly monthly (see discover_tv_registry.py's own docstring), so even
-    # a weekly run mostly re-fetches and re-diffs unchanged source data. Writes
-    # manual_verified_tv.json, a different file from the manual_verified_radio.json trio
-    # (discover-liveradios.yml, discover-commercial-radio.yml, discover-crs-registry.yml), but
-    # still pushes to the same private repo's main branch, so it still wants a slot of its own.
-    #
-    # Tuesday 9:23 AM UTC (2:53 PM IST). Odd minute for the same dropped-scheduled-trigger reason
-    # given in discover-liveradios.yml. Clear of scrape.yml's daily 1:30 AM UTC window, and on a
-    # different day from every other discovery workflow here.
+    # Daily at 9:23 AM UTC (2:53 PM IST) - see discover-liveradios.yml for the schedule rules. TRAI
+    # republishes its permitted-channels PDF roughly monthly, so most runs find nothing new.
     - cron: '23 9 * * *'
   workflow_dispatch: # Allow manual triggering
 
